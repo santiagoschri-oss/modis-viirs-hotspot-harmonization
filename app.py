@@ -170,7 +170,32 @@ if len(partial):
 st.caption("Error bars: typical discrepancy between converted VIIRS and MODIS ≈ 0.94·N^−0.245, validated for N ≥ 7 (Paraguay, 2020–2025). This is not the error against actual fire.")
 st.caption("Orange: 2000-11 to 2002-06, Terra only, scaled with a factor that cannot be validated; the true value could be higher. Data from 2026-08 onward are provisional, and November 2026 is incomplete.")
 st.caption("Counts are not corrected for clouds or missing data. A cell is included in the area if its center lies inside the rectangle (0.25° grid).")
+# ---- CSV downloads ----
+st.subheader("Download data")
 
+# 1. Datos por celda y mes
+cell_export = sel[
+    sel["mes"].between(pd.Period(start, "M"), pd.Period(end, "M"))
+].copy()
+
+cell_export["mes"] = cell_export["mes"].astype(str)
+cell_export["origen"] = cell_export["mes"].map(
+    lambda m: LABELS[source(pd.Period(m, "M"))]
+)
+cell_export["provisorio"] = cell_export["mes"].map(
+    lambda m: pd.Period(m, "M") >= PROV_START
+)
+
+cell_export = cell_export[
+    ["cy", "cx", "lat", "lon", "mes", "conteo_eq", "origen", "provisorio"]
+].sort_values(["mes", "cy", "cx"])
+
+st.download_button(
+    label="Download cell-by-month data (CSV)",
+    data=cell_export.to_csv(index=False).encode("utf-8-sig"),
+    file_name="hotspots_cell_month.csv",
+    mime="text/csv"
+)
 # ---- Burning activity calendar ----
 st.subheader("Burning activity calendar")
 view = st.radio("Calendar shows", ["Hotspot counts", "Anomaly vs. historical median"], horizontal=True)
@@ -190,3 +215,9 @@ with st.expander("View aggregated data"):
     out = out.rename(columns={"group": "period", "n": "hotspots", "prov": "provisional",
                               "low": "low_reliability", "err": "error_bar"})
     st.dataframe(out)
+ st.download_button(
+        label="Download aggregated time series (CSV)",
+        data=out.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"hotspots_aggregated_{agg.lower()}.csv",
+        mime="text/csv"
+    )
