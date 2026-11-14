@@ -215,9 +215,9 @@ with st.expander("View aggregated data"):
     out = out.rename(columns={"group": "period", "n": "hotspots", "prov": "provisional",
                               "low": "low_reliability", "err": "error_bar"})
     st.dataframe(out)
- st.download_button(
-        label="Download aggregated time series (CSV)",
-        data=out.to_csv(index=False).encode("utf-8-sig"),
-        file_name=f"hotspots_aggregated_{agg.lower()}.csv",
-        mime="text/csv"
-    )
+    st.download_button(
+           label="Download aggregated time series (CSV)",
+           data=out.to_csv(index=False).encode("utf-8-sig"),
+           file_name=f"hotspots_aggregated_{agg.lower()}.csv",
+           mime="text/csv"
+       )
