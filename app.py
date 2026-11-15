@@ -1,6 +1,5 @@
 from pathlib import Path
 import json
-from tensorflow import keras
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -158,6 +157,7 @@ legend.append(Patch(facecolor="white", edgecolor="black", hatch="///", label=f"l
 if res.prov.any():
     legend.append(Patch(facecolor="grey", alpha=0.45, label="provisional (NRT)"))
 ax.legend(handles=legend, loc="upper right", fontsize=8)
+fig.tight_layout()
 st.pyplot(fig)
 plt.close(fig)
 
@@ -175,10 +175,75 @@ try:
 except Exception as e:
     st.info(f"The interactive globe is not available: {e}")
 
+# ---- Metrics and caveats ----
+c1, c2, c3 = st.columns(3)
+c1.metric("Hotspots in range (MODIS scale)", f"{res.n.sum():,.0f}")
+c2.metric("Cells with hotspots (0.25°)", sel[["cy", "cx"]].drop_duplicates().shape[0])
+c3.metric("Low-reliability periods", f"{int(res.low.sum())} of {len(res)}")
+partial = res.index[res.months < k]
+if len(partial):
+    st.caption("Incomplete periods: " + ", ".join(map(str, partial)))
+st.caption("Error bars: typical discrepancy between converted VIIRS and MODIS ≈ 0.94·N^−0.245, validated for N ≥ 7 (Paraguay, 2020–2025). This is not the error against actual fire.")
+st.caption("Orange: 2000-11 to 2002-06, Terra only, scaled with a factor that cannot be validated; the true value could be higher. Data from 2026-08 onward are provisional, and November 2026 is incomplete.")
+st.caption("Counts are not corrected for clouds or missing data. A cell is included in the area if its center lies inside the rectangle (0.25° grid).")
+
+# ---- CSV downloads ----
+st.subheader("Download data")
+
+# 1. Datos por celda y mes
+cell_export = sel[
+    sel["mes"].between(pd.Period(start, "M"), pd.Period(end, "M"))
+].copy()
+
+cell_export["mes"] = cell_export["mes"].astype(str)
+cell_export["origen"] = cell_export["mes"].map(
+    lambda m: LABELS[source(pd.Period(m, "M"))]
+)
+cell_export["provisorio"] = cell_export["mes"].map(
+    lambda m: pd.Period(m, "M") >= PROV_START
+)
+
+cell_export = cell_export[
+    ["cy", "cx", "lat", "lon", "mes", "conteo_eq", "origen", "provisorio"]
+].sort_values(["mes", "cy", "cx"])
+
+st.download_button(
+    label="Download cell-by-month data (CSV)",
+    data=cell_export.to_csv(index=False).encode("utf-8-sig"),
+    file_name="hotspots_cell_month.csv",
+    mime="text/csv"
+)
+
+# ---- Burning activity calendar ----
+st.subheader("Burning activity calendar")
+view = st.radio("Calendar shows", ["Hotspot counts", "Anomaly vs. historical median"], horizontal=True)
+fig_cal = calendar_fig(full_series, pd.Period(start, "M"), pd.Period(end, "M"),
+                       "counts" if view == "Hotspot counts" else "anomaly")
+st.pyplot(fig_cal)
+plt.close(fig_cal)
+st.caption("Each cell is one month of the selected area. Values are printed in every cell, so the color is never the only cue. "
+           "The color scales are perceptually uniform (viridis) and blue-red diverging, which stay distinguishable with common forms of color blindness.")
+st.caption("Anomaly = count divided by the median of the same calendar month over 2002-07 to 2026-07 (observed MODIS and converted VIIRS; "
+           "the Terra-only and provisional months are not part of the baseline). 2x means twice the usual activity for that month. "
+           "Gray cells have no data or an undefined ratio (median = 0). Estimated and provisional months are hatched. "
+           "The latest month is incomplete and is left out of the anomaly view.")
+with st.expander("View aggregated data"):
+    out = res.reset_index().astype({"group": str})
+    out["source"] = out["source"].map(LABELS)
+    out = out.rename(columns={"group": "period", "n": "hotspots", "prov": "provisional",
+                              "low": "low_reliability", "err": "error_bar"})
+    st.dataframe(out)
+    st.download_button(
+        label="Download aggregated time series (CSV)",
+        data=out.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"hotspots_aggregated_{agg.lower()}.csv",
+        mime="text/csv"
+    )
 
 # ============================================================
 # NATIONAL HOTSPOT FORECAST - PARAGUAY
 # N-HiTS-inspired model implemented in Keras
+# (last on purpose: if it fails, nothing above is affected)
 # ============================================================
 
 st.divider()
@@ -195,6 +260,8 @@ METADATA_PATH = MODEL_DIR / "metadata.json"
 
 @st.cache_resource
 def load_forecast_model():
+    from tensorflow import keras      # imported here so TensorFlow only loads for the forecast
+
     model = keras.models.load_model(
         MODEL_PATH,
         compile=False
@@ -408,66 +475,3 @@ try:
 
 except Exception as e:
     st.error(f"Unable to generate the forecast: {e}")
-
-# ---- Metrics and caveats ----
-c1, c2, c3 = st.columns(3)
-c1.metric("Hotspots in range (MODIS scale)", f"{res.n.sum():,.0f}")
-c2.metric("Cells with hotspots (0.25°)", sel[["cy", "cx"]].drop_duplicates().shape[0])
-c3.metric("Low-reliability periods", f"{int(res.low.sum())} of {len(res)}")
-partial = res.index[res.months < k]
-if len(partial):
-    st.caption("Incomplete periods: " + ", ".join(map(str, partial)))
-st.caption("Error bars: typical discrepancy between converted VIIRS and MODIS ≈ 0.94·N^−0.245, validated for N ≥ 7 (Paraguay, 2020–2025). This is not the error against actual fire.")
-st.caption("Orange: 2000-11 to 2002-06, Terra only, scaled with a factor that cannot be validated; the true value could be higher. Data from 2026-08 onward are provisional, and November 2026 is incomplete.")
-st.caption("Counts are not corrected for clouds or missing data. A cell is included in the area if its center lies inside the rectangle (0.25° grid).")
-# ---- CSV downloads ----
-st.subheader("Download data")
-
-# 1. Datos por celda y mes
-cell_export = sel[
-    sel["mes"].between(pd.Period(start, "M"), pd.Period(end, "M"))
-].copy()
-
-cell_export["mes"] = cell_export["mes"].astype(str)
-cell_export["origen"] = cell_export["mes"].map(
-    lambda m: LABELS[source(pd.Period(m, "M"))]
-)
-cell_export["provisorio"] = cell_export["mes"].map(
-    lambda m: pd.Period(m, "M") >= PROV_START
-)
-
-cell_export = cell_export[
-    ["cy", "cx", "lat", "lon", "mes", "conteo_eq", "origen", "provisorio"]
-].sort_values(["mes", "cy", "cx"])
-
-st.download_button(
-    label="Download cell-by-month data (CSV)",
-    data=cell_export.to_csv(index=False).encode("utf-8-sig"),
-    file_name="hotspots_cell_month.csv",
-    mime="text/csv"
-)
-# ---- Burning activity calendar ----
-st.subheader("Burning activity calendar")
-view = st.radio("Calendar shows", ["Hotspot counts", "Anomaly vs. historical median"], horizontal=True)
-fig_cal = calendar_fig(full_series, pd.Period(start, "M"), pd.Period(end, "M"),
-                       "counts" if view == "Hotspot counts" else "anomaly")
-st.pyplot(fig_cal)
-plt.close(fig_cal)
-st.caption("Each cell is one month of the selected area. Values are printed in every cell, so the color is never the only cue. "
-           "The color scales are perceptually uniform (viridis) and blue-red diverging, which stay distinguishable with common forms of color blindness.")
-st.caption("Anomaly = count divided by the median of the same calendar month over 2002-07 to 2026-07 (observed MODIS and converted VIIRS; "
-           "the Terra-only and provisional months are not part of the baseline). 2x means twice the usual activity for that month. "
-           "Gray cells have no data or an undefined ratio (median = 0). Estimated and provisional months are hatched. "
-           "The latest month is incomplete and is left out of the anomaly view.")
-with st.expander("View aggregated data"):
-    out = res.reset_index().astype({"group": str})
-    out["source"] = out["source"].map(LABELS)
-    out = out.rename(columns={"group": "period", "n": "hotspots", "prov": "provisional",
-                              "low": "low_reliability", "err": "error_bar"})
-    st.dataframe(out)
-    st.download_button(
-           label="Download aggregated time series (CSV)",
-           data=out.to_csv(index=False).encode("utf-8-sig"),
-           file_name=f"hotspots_aggregated_{agg.lower()}.csv",
-           mime="text/csv"
-       )
