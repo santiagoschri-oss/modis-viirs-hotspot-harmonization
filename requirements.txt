@@ -1,3 +1,6 @@
+# Starlette 1.8+ breaks Streamlit's gzip middleware for images (every /media/ request fails).
+# Verified in the deploy log: starlette 1.10.0 + streamlit 1.60.0 is the failing pair.
+starlette==1.4.1
 streamlit
 pandas
 numpy
