@@ -236,7 +236,6 @@ Several limitations should be considered when interpreting the harmonized series
 | `harmonization.ipynb` | Notebook that produces the harmonized table and uncertainty analysis |
 | `train_nhits.ipynb` | Training and validation of the forecasting model |
 | `models/nhits/` | Forecast model files and/or precomputed forecast (`forecast_nhits.csv`) |
-| `make_forecast.py` | Script for precomputing the forecast, if used |
 | `figures/` | Scientific figures and visualizations included in this README |
 | `requirements.txt` | Python dependencies |
 
