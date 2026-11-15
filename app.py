@@ -1,5 +1,6 @@
 from pathlib import Path
-
+import json
+from tensorflow import keras
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -158,6 +159,239 @@ if res.prov.any():
 ax.legend(handles=legend, loc="upper right", fontsize=8)
 st.pyplot(fig)
 plt.close(fig)
+
+# ============================================================
+# NATIONAL HOTSPOT FORECAST - PARAGUAY
+# N-HiTS-inspired model implemented in Keras
+# ============================================================
+
+st.divider()
+st.header("National Fire Activity Forecast")
+st.caption(
+    "Monthly national estimates for Paraguay using a deep learning "
+    "model trained on the harmonized historical time series."
+)
+
+MODEL_DIR = Path(__file__).parent / "models" / "nhits"
+MODEL_PATH = MODEL_DIR / "nbeats_final.keras"
+METADATA_PATH = MODEL_DIR / "metadata.json"
+
+
+@st.cache_resource
+def load_forecast_model():
+    model = keras.models.load_model(
+        MODEL_PATH,
+        compile=False
+    )
+
+    with open(METADATA_PATH, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+
+    return model, metadata
+
+
+@st.cache_data
+def prepare_national_series():
+    # Load the complete original dataset, without applying the user's AOI.
+    data = load().copy()
+
+    # Exclude the current incomplete month.
+    current_month = pd.Period(pd.Timestamp.today(), freq="M")
+    data = data[data["mes"] < current_month].copy()
+
+    # Exclude provisional records, following the same procedure used during training.
+    if "provisorio" in data.columns:
+        provisional = (
+            data["provisorio"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+            .isin(["true", "1", "si", "sí"])
+        )
+        data = data[~provisional].copy()
+
+    # National aggregation: all grid cells across Paraguay.
+    national = (
+        data.groupby("mes")["conteo_eq"]
+        .sum()
+        .sort_index()
+    )
+
+    if national.empty:
+        raise ValueError("No historical data is available.")
+
+    # Fill missing months with zero.
+    full_index = pd.period_range(
+        start=national.index.min(),
+        end=national.index.max(),
+        freq="M"
+    )
+
+    national = national.reindex(full_index, fill_value=0)
+    national.index.name = "mes"
+
+    return national.astype(float)
+
+
+try:
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(
+            f"Model file not found: {MODEL_PATH}"
+        )
+
+    if not METADATA_PATH.exists():
+        raise FileNotFoundError(
+            f"Metadata file not found: {METADATA_PATH}"
+        )
+
+    model, metadata = load_forecast_model()
+    national_series = prepare_national_series()
+
+    input_size = int(metadata["input_size"])
+    horizon = int(metadata["horizon"])
+
+    if len(national_series) < input_size:
+        raise ValueError(
+            f"At least {input_size} months of historical data are required."
+        )
+
+    # Load the scaler parameters saved during model training.
+    mu = float(metadata["scaler"]["mu"])
+    sd = float(metadata["scaler"]["sd"])
+
+    if sd == 0:
+        raise ValueError("The scaler standard deviation is zero.")
+
+    # Select the last 36 complete months.
+    historical_values = national_series.iloc[-input_size:].values
+
+    # Apply the same transformation used during training.
+    x_scaled = (
+        (np.log1p(historical_values) - mu) / sd
+    ).astype("float32")
+
+    x_input = x_scaled.reshape(1, input_size)
+
+    # Direct prediction for the next 12 months.
+    prediction_scaled = model.predict(
+        x_input,
+        verbose=0
+    ).reshape(-1)
+
+    if len(prediction_scaled) != horizon:
+        raise ValueError(
+            f"The model returned {len(prediction_scaled)} values; "
+            f"{horizon} were expected."
+        )
+
+    # Invert the logarithmic transformation.
+    prediction = np.maximum(
+        np.expm1(prediction_scaled * sd + mu),
+        0
+    )
+
+    # Generate future months starting after the last complete historical month.
+    last_month = national_series.index[-1]
+
+    future_months = pd.period_range(
+        start=last_month + 1,
+        periods=horizon,
+        freq="M"
+    )
+
+    forecast_df = pd.DataFrame({
+        "Month": future_months.astype(str),
+        "Estimated_Equivalent_Hotspots": np.round(prediction).astype(int)
+    })
+
+    # Display forecast results.
+    st.subheader("Forecast for the Next 12 Months")
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric(
+        "Last Observed Month",
+        str(last_month)
+    )
+
+    col2.metric(
+        "Forecast Horizon",
+        f"{horizon} months"
+    )
+
+    col3.metric(
+        "Estimated Monthly Average",
+        f"{np.mean(prediction):,.0f}"
+    )
+
+    # Plot recent historical data alongside the forecast.
+    historical_plot = national_series.iloc[-36:]
+
+    fig_forecast, ax = plt.subplots(figsize=(12, 5))
+
+    ax.plot(
+        [str(x) for x in historical_plot.index],
+        historical_plot.values,
+        label="Observed Historical Data",
+        linewidth=2
+    )
+
+    ax.plot(
+        forecast_df["Month"],
+        prediction,
+        label="N-HiTS Forecast",
+        linewidth=2,
+        linestyle="--",
+        marker="o"
+    )
+
+    ax.axvline(
+        x=35.5,
+        linestyle=":",
+        alpha=0.7,
+        label="Forecast Start"
+    )
+
+    ax.set_title("National Hotspot Activity: Historical Data and Forecast")
+    ax.set_xlabel("Month")
+    ax.set_ylabel("Equivalent Hotspots")
+    ax.tick_params(axis="x", rotation=75)
+    ax.grid(alpha=0.25)
+    ax.legend()
+    fig_forecast.tight_layout()
+
+    st.pyplot(fig_forecast)
+    plt.close(fig_forecast)
+
+    # Display forecast values in a table.
+    st.subheader("Estimated Monthly Values")
+    st.dataframe(
+        forecast_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # Download forecast as a CSV file.
+    csv_forecast = forecast_df.to_csv(
+        index=False
+    ).encode("utf-8")
+
+    st.download_button(
+        label="Download Forecast as CSV",
+        data=csv_forecast,
+        file_name="paraguay_national_hotspot_forecast.csv",
+        mime="text/csv"
+    )
+
+    st.caption(
+        "Note: These values represent estimated monthly equivalent hotspots, "
+        "not fire probabilities or fire risk indices. "
+        "The forecast covers all of Paraguay and is independent of the AOI "
+        "selected in the application."
+    )
+
+except Exception as e:
+    st.error(f"Unable to generate the forecast: {e}")
 
 # ---- Metrics and caveats ----
 c1, c2, c3 = st.columns(3)
