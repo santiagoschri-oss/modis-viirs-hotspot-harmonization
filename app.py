@@ -138,7 +138,19 @@ res = g.groupby("group").agg(n=("n", "sum"), months=("n", "size"), prov=("prov",
                              source=("source", lambda s: s.iat[0] if s.nunique() == 1 else "mixto"))
 res["low"] = res.n < N_MIN
 res["err"] = np.where(res.low, np.nan, res.n * A * np.maximum(res.n, 1e-9) ** B)
-
+# ---- Interactive globe ----
+st.subheader("Interactive globe")
+try:
+    from globe import build_globe
+    in_rng = (sel.mes >= pd.Period(start, "M")) & (sel.mes <= pd.Period(end, "M"))
+    cell_tot = sel[in_rng].groupby(["lat", "lon"], as_index=False).conteo_eq.sum()
+    st.plotly_chart(build_globe(cell_tot, float(res.n.sum()), str(series.idxmax()), start, end),
+                    theme=None, width="stretch")
+    st.caption("Drag to rotate and scroll to zoom. Each square is a 0.25-degree cell with harmonized hotspots "
+               "for the area and month range selected in the sidebar. Only Paraguay has harmonized data so far; "
+               "the other countries are coming soon. The globe needs an internet connection to load the country shapes.")
+except Exception as e:
+    st.info(f"The interactive globe is not available: {e}")
 # ---- Chart ----
 x = res.index.to_timestamp()
 fig, ax = plt.subplots(figsize=(13, 4.5))
