@@ -1,0 +1,52 @@
+{
+    "model": "N-HiTS (Keras)",
+    "series": "PARAGUAY",
+    "frequency": "monthly",
+    "horizon": 12,
+    "input_size": 36,
+    "n_blocks": 3,
+    "width": 64,
+    "n_layers": 2,
+    "split": {
+        "train": [
+            "2000-11",
+            "2018-10"
+        ],
+        "val": [
+            "2018-11",
+            "2022-08"
+        ],
+        "test": [
+            "2022-09",
+            "2026-07"
+        ]
+    },
+    "best_epoch": 70,
+    "epochs_final": 109,
+    "scaler": {
+        "transform": "log1p + estandarización (solo entrenamiento)",
+        "mu": 7.714176824941749,
+        "sd": 0.9822749578660287
+    },
+    "val": {
+        "mae": 2155.1829192000455,
+        "rmse": 2991.543746521006,
+        "mape": 55.19323123170508
+    },
+    "test": {
+        "mae": 1155.5146820669245,
+        "rmse": 1431.692777522035,
+        "mape": 72.70645476079173
+    },
+    "random_seed": 42,
+    "pool_sizes": [
+        4,
+        2,
+        1
+    ],
+    "freq_downsample": [
+        4,
+        2,
+        1
+    ]
+}
